@@ -1,7 +1,12 @@
+import os
+import threading
+from flask import Flask
 import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
+
+app = Flask(__name__)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -12,6 +17,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Guild ID aus Umgebungsvariable holen
 GUILD_ID = int(os.getenv("GUILD_ID"))
+
+# Beispiel-Route für den Webserver (UptimeRobot pingt diese URL)
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+# Starte Flask-Webserver in eigenem Thread
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
 # --- On Ready ---
 @bot.event
