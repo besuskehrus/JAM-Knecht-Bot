@@ -5,8 +5,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
+from typing import Optional
 
-# --- Flask Webserver ---
+# === Flask Webserver (für Render Health Check) ===
 app = Flask(__name__)
 
 @app.route('/')
@@ -16,10 +17,10 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# Starte Flask-Server in separatem Thread
+# Flask-Server im Thread starten
 threading.Thread(target=run_flask).start()
 
-# --- Discord Bot Setup ---
+# === Discord Bot Setup ===
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -27,7 +28,7 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Guild ID und wichtige Channel-IDs aus Umgebungsvariablen holen
+# === Umgebungsvariablen ===
 GUILD_ID = int(os.getenv("GUILD_ID"))
 TEMP_VC_CATEGORY_ID = int(os.getenv("TEMP_VC_CATEGORY_ID", 0))
 CREATE_VC_CHANNEL_ID = int(os.getenv("CREATE_VC_CHANNEL_ID", 0))
@@ -35,10 +36,10 @@ CREATE_VC_CHANNEL_ID = int(os.getenv("CREATE_VC_CHANNEL_ID", 0))
 if TEMP_VC_CATEGORY_ID == 0 or CREATE_VC_CHANNEL_ID == 0:
     print("⚠️ Bitte TEMP_VC_CATEGORY_ID und CREATE_VC_CHANNEL_ID als Umgebungsvariablen setzen!")
 
-# Mapping: User ID -> Temp Voice Channel ID
+# Mapping: User-ID → Temp VC-ID
 temp_voice_channels = {}
 
-# --- On Ready ---
+# === Event: Bot bereit ===
 @bot.event
 async def on_ready():
     print(f"✅ Bot ist online: {bot.user}")
@@ -46,53 +47,44 @@ async def on_ready():
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"🔁 Slash Commands synchronisiert: {len(synced)}")
     except Exception as e:
-        print(f"Fehler beim Synchronisieren: {e}")
+        print(f"❌ Fehler beim Synchronisieren: {e}")
 
-# --- Voice State Update: Temp VC Logik ---
+# === Join-to-Create VC Logik ===
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot:
-        return  # Bots ignorieren
+        return
 
     guild = member.guild
 
-    # Temp VC erstellen, wenn User dem "Create Voice" Channel beitritt
+    # Temp VC erstellen
     if after.channel and after.channel.id == CREATE_VC_CHANNEL_ID:
         category = guild.get_channel(TEMP_VC_CATEGORY_ID)
-        if category is None:
+        if not category:
             print("⚠️ Kategorie für Temp-VC nicht gefunden!")
             return
 
-        # Erstelle neuen Voice Channel mit Namen "Voicechat von [USER]"
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
             member: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
         }
+
         new_vc = await guild.create_voice_channel(
             name=f"Voicechat von {member.display_name}",
             category=category,
             overwrites=overwrites
         )
         temp_voice_channels[member.id] = new_vc.id
-
-        # User in den neuen Voice-Channel verschieben
         await member.move_to(new_vc)
 
-    # Temp VC löschen, wenn dieser leer wird
+    # Leere Temp-VCs löschen
     if before.channel and before.channel.id in temp_voice_channels.values():
         channel = before.channel
         if len(channel.members) == 0:
             await channel.delete()
-            # Eintrag im Mapping entfernen
-            user_to_remove = None
-            for uid, cid in temp_voice_channels.items():
-                if cid == channel.id:
-                    user_to_remove = uid
-                    break
-            if user_to_remove:
-                del temp_voice_channels[user_to_remove]
+            temp_voice_channels = {uid: cid for uid, cid in temp_voice_channels.items() if cid != channel.id}
 
-# --- Beispiel: Slash Command zum Verbergen / Freigeben (Platzhalter, erweitern nach Wunsch) ---
+# === Slash Command: /verstecke ===
 @bot.tree.command(name="verstecke", description="Verstecke deinen temporären Voicechat", guild=discord.Object(id=GUILD_ID))
 async def verstecke(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -101,7 +93,7 @@ async def verstecke(interaction: discord.Interaction):
         return
 
     channel = bot.get_channel(temp_voice_channels[user_id])
-    if channel is None:
+    if not channel:
         await interaction.response.send_message("❌ Dein Voicechat wurde nicht gefunden.", ephemeral=True)
         return
 
@@ -111,6 +103,7 @@ async def verstecke(interaction: discord.Interaction):
 
     await interaction.response.send_message("✅ Dein Voicechat wurde versteckt.", ephemeral=True)
 
+# === Slash Command: /zeige ===
 @bot.tree.command(name="zeige", description="Zeige deinen temporären Voicechat wieder an", guild=discord.Object(id=GUILD_ID))
 async def zeige(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -119,7 +112,7 @@ async def zeige(interaction: discord.Interaction):
         return
 
     channel = bot.get_channel(temp_voice_channels[user_id])
-    if channel is None:
+    if not channel:
         await interaction.response.send_message("❌ Dein Voicechat wurde nicht gefunden.", ephemeral=True)
         return
 
@@ -129,7 +122,7 @@ async def zeige(interaction: discord.Interaction):
 
     await interaction.response.send_message("✅ Dein Voicechat ist jetzt wieder sichtbar.", ephemeral=True)
 
-# --- Slash Command /jam ---
+# === Slash Command: /jam ===
 @bot.tree.command(name="jam", description="Spotify Jam-Link posten", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(link="Dein Spotify Jam-Link")
 async def jam(interaction: discord.Interaction, link: str):
@@ -146,72 +139,65 @@ async def jam(interaction: discord.Interaction, link: str):
         view=view
     )
 
-from typing import Optional
-
-# /einladen Befehl: bestimmte Mitglieder sichtbar machen
-@bot.tree.command(name="einladen", description="Gib bestimmten Mitgliedern Zugriff auf deinen Voicechat", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(members="Mitglieder, die Zugriff erhalten sollen (Komma-getrennte Usernamen)")
-async def einladen(interaction: discord.Interaction, members: str):
-    guild = interaction.guild
-    author = interaction.user
-    category = guild.get_channel(int(os.getenv("TEMP_VC_CATEGORY_ID")))
-    
-    # Suche den Voicechannel, in dem der User gerade ist und der zur Kategorie gehört
-    voice_channel = None
-    if author.voice and author.voice.channel and author.voice.channel.category_id == category.id:
-        voice_channel = author.voice.channel
-    else:
-        await interaction.response.send_message("❌ Du musst dich in deinem temporären Voicechat befinden.", ephemeral=True)
+# === Slash Command: /einladen ===
+@bot.tree.command(
+    name="einladen",
+    description="Gib bestimmten Mitgliedern Zugriff auf deinen Voicechat",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(
+    user1="Mitglied 1",
+    user2="Mitglied 2",
+    user3="Mitglied 3",
+    user4="Mitglied 4",
+    user5="Mitglied 5"
+)
+async def einladen(
+    interaction: discord.Interaction,
+    user1: discord.Member,
+    user2: Optional[discord.Member] = None,
+    user3: Optional[discord.Member] = None,
+    user4: Optional[discord.Member] = None,
+    user5: Optional[discord.Member] = None,
+):
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.response.send_message("❌ Du bist in keinem Voice-Channel.", ephemeral=True)
         return
-    
-    # Mitglieder aus String auslesen (Usernamen getrennt durch Kommas)
-    usernames = [u.strip() for u in members.split(",")]
-    members_to_add = []
-    
-    for name in usernames:
-        # Suche Member nach Name#1234 (voller Discord-Tag)
-        member = discord.utils.get(guild.members, name=name.split("#")[0], discriminator=name.split("#")[1] if "#" in name else None)
-        if member:
-            members_to_add.append(member)
-        else:
-            await interaction.response.send_message(f"❌ Mitglied `{name}` nicht gefunden.", ephemeral=True)
-            return
-    
-    # Setze die View-Berechtigungen für die Mitglieder
-    overwrites = voice_channel.overwrites
-    for member in members_to_add:
-        overwrites[member] = discord.PermissionOverwrite(view_channel=True, connect=True)
-    
-    await voice_channel.edit(overwrites=overwrites)
-    await interaction.response.send_message(f"✅ Mitglieder wurden eingeladen und können deinen Voicechat sehen: {', '.join([m.display_name for m in members_to_add])}", ephemeral=True)
 
-# /limit Befehl: maximale Teilnehmerzahl setzen
+    channel = interaction.user.voice.channel
+    users = [user for user in [user1, user2, user3, user4, user5] if user is not None]
+
+    for member in users:
+        await channel.set_permissions(member, view_channel=True, connect=True)
+
+    mentions = ", ".join(member.mention for member in users)
+    await interaction.response.send_message(
+        f"✅ Folgende Mitglieder wurden zum Voice-Channel eingeladen: {mentions}",
+        ephemeral=True
+    )
+
+# === Slash Command: /limit ===
 @bot.tree.command(name="limit", description="Setze das maximale Teilnehmerlimit für deinen Voicechat", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(limit="Maximale Anzahl an Teilnehmern (0 für kein Limit)")
 async def limit(interaction: discord.Interaction, limit: int):
     guild = interaction.guild
     author = interaction.user
-    category = guild.get_channel(int(os.getenv("TEMP_VC_CATEGORY_ID")))
-    
-    voice_channel = None
-    if author.voice and author.voice.channel and author.voice.channel.category_id == category.id:
+    category = guild.get_channel(TEMP_VC_CATEGORY_ID)
+
+    if author.voice and author.voice.channel and author.voice.channel.category and author.voice.channel.category.id == category.id:
         voice_channel = author.voice.channel
     else:
         await interaction.response.send_message("❌ Du musst dich in deinem temporären Voicechat befinden.", ephemeral=True)
         return
-    
+
     if limit < 0 or limit > 99:
         await interaction.response.send_message("❌ Bitte gib eine Zahl zwischen 0 und 99 ein.", ephemeral=True)
         return
-    
+
     await voice_channel.edit(user_limit=limit if limit > 0 else 0)
-    if limit == 0:
-        msg = "Das Teilnehmerlimit wurde entfernt."
-    else:
-        msg = f"Das Teilnehmerlimit wurde auf {limit} gesetzt."
+
+    msg = "Das Teilnehmerlimit wurde entfernt." if limit == 0 else f"Das Teilnehmerlimit wurde auf {limit} gesetzt."
     await interaction.response.send_message(f"✅ {msg}", ephemeral=True)
 
-# --- Webserver bereits gestartet via Thread ---
-
-# --- Bot starten ---
+# === Bot starten ===
 bot.run(os.getenv("DISCORD_TOKEN"))
