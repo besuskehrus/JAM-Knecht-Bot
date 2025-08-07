@@ -52,4 +52,5 @@ async def jam(interaction: discord.Interaction, link: str):
     )
 
 # --- Bot starten ---
-bot.run("MTQwMjk4ODYwNjE2NzA1NjM5NA.GKp85W.eUpjk6rAcdYYBWEp2jjPDY1IzFsy18NYqoSYNs")
+import os
+bot.run(os.getenv("MTQwMjk4ODYwNjE2NzA1NjM5NA.GKp85W.eUpjk6rAcdYYBWEp2jjPDY1IzFsy18NYqoSYNs"))
