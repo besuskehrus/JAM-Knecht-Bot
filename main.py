@@ -146,6 +146,71 @@ async def jam(interaction: discord.Interaction, link: str):
         view=view
     )
 
+from typing import Optional
+
+# /einladen Befehl: bestimmte Mitglieder sichtbar machen
+@bot.tree.command(name="einladen", description="Gib bestimmten Mitgliedern Zugriff auf deinen Voicechat", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(members="Mitglieder, die Zugriff erhalten sollen (Komma-getrennte Usernamen)")
+async def einladen(interaction: discord.Interaction, members: str):
+    guild = interaction.guild
+    author = interaction.user
+    category = guild.get_channel(int(os.getenv("TEMP_VC_CATEGORY_ID")))
+    
+    # Suche den Voicechannel, in dem der User gerade ist und der zur Kategorie gehört
+    voice_channel = None
+    if author.voice and author.voice.channel and author.voice.channel.category_id == category.id:
+        voice_channel = author.voice.channel
+    else:
+        await interaction.response.send_message("❌ Du musst dich in deinem temporären Voicechat befinden.", ephemeral=True)
+        return
+    
+    # Mitglieder aus String auslesen (Usernamen getrennt durch Kommas)
+    usernames = [u.strip() for u in members.split(",")]
+    members_to_add = []
+    
+    for name in usernames:
+        # Suche Member nach Name#1234 (voller Discord-Tag)
+        member = discord.utils.get(guild.members, name=name.split("#")[0], discriminator=name.split("#")[1] if "#" in name else None)
+        if member:
+            members_to_add.append(member)
+        else:
+            await interaction.response.send_message(f"❌ Mitglied `{name}` nicht gefunden.", ephemeral=True)
+            return
+    
+    # Setze die View-Berechtigungen für die Mitglieder
+    overwrites = voice_channel.overwrites
+    for member in members_to_add:
+        overwrites[member] = discord.PermissionOverwrite(view_channel=True, connect=True)
+    
+    await voice_channel.edit(overwrites=overwrites)
+    await interaction.response.send_message(f"✅ Mitglieder wurden eingeladen und können deinen Voicechat sehen: {', '.join([m.display_name for m in members_to_add])}", ephemeral=True)
+
+# /limit Befehl: maximale Teilnehmerzahl setzen
+@bot.tree.command(name="limit", description="Setze das maximale Teilnehmerlimit für deinen Voicechat", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(limit="Maximale Anzahl an Teilnehmern (0 für kein Limit)")
+async def limit(interaction: discord.Interaction, limit: int):
+    guild = interaction.guild
+    author = interaction.user
+    category = guild.get_channel(int(os.getenv("TEMP_VC_CATEGORY_ID")))
+    
+    voice_channel = None
+    if author.voice and author.voice.channel and author.voice.channel.category_id == category.id:
+        voice_channel = author.voice.channel
+    else:
+        await interaction.response.send_message("❌ Du musst dich in deinem temporären Voicechat befinden.", ephemeral=True)
+        return
+    
+    if limit < 0 or limit > 99:
+        await interaction.response.send_message("❌ Bitte gib eine Zahl zwischen 0 und 99 ein.", ephemeral=True)
+        return
+    
+    await voice_channel.edit(user_limit=limit if limit > 0 else 0)
+    if limit == 0:
+        msg = "Das Teilnehmerlimit wurde entfernt."
+    else:
+        msg = f"Das Teilnehmerlimit wurde auf {limit} gesetzt."
+    await interaction.response.send_message(f"✅ {msg}", ephemeral=True)
+
 # --- Webserver bereits gestartet via Thread ---
 
 # --- Bot starten ---
