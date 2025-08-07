@@ -9,7 +9,9 @@ intents.members = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-GUILD_ID = 1325461249256984596  # Ersetze das durch deine Server-ID (Rechtsklick auf Server > ID kopieren)
+
+# Guild ID aus Umgebungsvariable holen
+GUILD_ID = int(os.getenv("GUILD_ID"))
 
 # --- On Ready ---
 @bot.event
