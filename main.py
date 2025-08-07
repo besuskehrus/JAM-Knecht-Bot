@@ -6,8 +6,20 @@ from discord.ext import commands
 from discord import app_commands
 import asyncio
 
+# --- Flask Webserver ---
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+# Starte Flask-Server in separatem Thread
+threading.Thread(target=run_flask).start()
+
+# --- Discord Bot Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -17,15 +29,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Guild ID aus Umgebungsvariable holen
 GUILD_ID = int(os.getenv("GUILD_ID"))
-
-# Beispiel-Route für den Webserver (UptimeRobot pingt diese URL)
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-# Starte Flask-Webserver in eigenem Thread
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
 
 # --- On Ready ---
 @bot.event
@@ -40,7 +43,6 @@ async def on_ready():
 # --- Voice-Event: erkennt VC-Join ---
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # Nur wenn jemand NEU in einen VC kommt
     if after.channel and (before.channel != after.channel) and not member.bot:
         channel_name = after.channel.name
         text_channel = discord.utils.get(member.guild.text_channels, name="jam-links")
@@ -57,7 +59,6 @@ async def jam(interaction: discord.Interaction, link: str):
         await interaction.response.send_message("❌ Das ist kein gültiger Spotify Jam-Link!", ephemeral=True)
         return
 
-    # Button generieren
     view = discord.ui.View()
     button = discord.ui.Button(label="🎶 Jam beitreten", url=link)
     view.add_item(button)
@@ -68,5 +69,4 @@ async def jam(interaction: discord.Interaction, link: str):
     )
 
 # --- Bot starten ---
-import os
 bot.run(os.getenv("DISCORD_TOKEN"))
