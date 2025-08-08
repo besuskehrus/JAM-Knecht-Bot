@@ -259,28 +259,25 @@ async def reactionrole_remove(interaction: discord.Interaction, message_id: str,
         await interaction.response.send_message("❌ Keine Reaction Role mit diesen Daten gefunden.", ephemeral=True)
         return
 
-    role_id = reaction_roles[message_id][emoji]
+    # Rolle löschen
     del reaction_roles[message_id][emoji]
 
-    # Wenn keine Emojis mehr auf dieser Nachricht registriert sind, löschen wir den Key
     if not reaction_roles[message_id]:
         del reaction_roles[message_id]
 
     with open("reaction_roles.json", "w") as f:
         json.dump(reaction_roles, f, indent=4)
 
-    # Emoji von der Nachricht entfernen
+    # Versuche, die Reaktion von der Nachricht zu entfernen
     for channel in interaction.guild.text_channels:
         try:
             message = await channel.fetch_message(int(message_id))
             await message.clear_reaction(emoji)
-            break
+            break  # Wenn erfolgreich, nicht weiter suchen
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             continue
 
     await interaction.response.send_message("✅ Reaction Role wurde entfernt und Reaktion gelöscht.", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Keine passende Emoji-Verknüpfung gefunden.", ephemeral=True)
 
 # --- Bot starten ---
 bot.run(os.getenv("DISCORD_TOKEN"))
