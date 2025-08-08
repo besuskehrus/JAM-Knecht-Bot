@@ -1,6 +1,6 @@
 import os
-import threading
 import json
+import threading
 from flask import Flask
 import discord
 from discord.ext import commands
@@ -28,27 +28,25 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# --- IDs ---
 GUILD_ID = int(os.getenv("GUILD_ID"))
 TEMP_VC_CATEGORY_ID = int(os.getenv("TEMP_VC_CATEGORY_ID", 0))
 CREATE_VC_CHANNEL_ID = int(os.getenv("CREATE_VC_CHANNEL_ID", 0))
+REACTION_ROLE_FILE = "reaction_roles.json"
 
 if TEMP_VC_CATEGORY_ID == 0 or CREATE_VC_CHANNEL_ID == 0:
     print("⚠️ Bitte TEMP_VC_CATEGORY_ID und CREATE_VC_CHANNEL_ID als Umgebungsvariablen setzen!")
 
+# --- Temp VC Tracking ---
 temp_voice_channels = {}
 
-# --- Reaction Role Setup ---
-REACTION_ROLE_FILE = "reaction_roles.json"
-
-if os.path.exists(REACTION_ROLE_FILE):
-    with open(REACTION_ROLE_FILE, "r") as f:
-        reaction_roles = json.load(f)
-else:
-    reaction_roles = {}
-
-def save_reaction_roles():
+# --- Reaction Roles laden ---
+if not os.path.exists(REACTION_ROLE_FILE):
     with open(REACTION_ROLE_FILE, "w") as f:
-        json.dump(reaction_roles, f, indent=2)
+        json.dump({}, f)
+
+with open(REACTION_ROLE_FILE, "r") as f:
+    reaction_roles = json.load(f)
 
 # --- Events ---
 @bot.event
@@ -101,31 +99,27 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if str(payload.message_id) not in reaction_roles or payload.user_id == bot.user.id:
-        return
-
-    for entry in reaction_roles[str(payload.message_id)]:
-        if entry["emoji"] == str(payload.emoji):
+    if str(payload.message_id) in reaction_roles:
+        emoji = str(payload.emoji)
+        if emoji in reaction_roles[str(payload.message_id)]:
             guild = bot.get_guild(payload.guild_id)
-            role = guild.get_role(entry["role_id"])
             member = guild.get_member(payload.user_id)
+            role_id = reaction_roles[str(payload.message_id)][emoji]
+            role = guild.get_role(role_id)
             if role and member:
                 await member.add_roles(role)
-            break
 
 @bot.event
 async def on_raw_reaction_remove(payload):
-    if str(payload.message_id) not in reaction_roles:
-        return
-
-    for entry in reaction_roles[str(payload.message_id)]:
-        if entry["emoji"] == str(payload.emoji):
+    if str(payload.message_id) in reaction_roles:
+        emoji = str(payload.emoji)
+        if emoji in reaction_roles[str(payload.message_id)]:
             guild = bot.get_guild(payload.guild_id)
-            role = guild.get_role(entry["role_id"])
             member = guild.get_member(payload.user_id)
+            role_id = reaction_roles[str(payload.message_id)][emoji]
+            role = guild.get_role(role_id)
             if role and member:
                 await member.remove_roles(role)
-            break
 
 # --- Slash Commands ---
 @bot.tree.command(name="verstecke", description="Verstecke deinen temporären Voicechat", guild=discord.Object(id=GUILD_ID))
@@ -143,6 +137,7 @@ async def verstecke(interaction: discord.Interaction):
     overwrite = channel.overwrites_for(interaction.guild.default_role)
     overwrite.view_channel = False
     await channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+
     await interaction.response.send_message("✅ Dein Voicechat wurde versteckt.", ephemeral=True)
 
 @bot.tree.command(name="zeige", description="Zeige deinen temporären Voicechat wieder an", guild=discord.Object(id=GUILD_ID))
@@ -160,6 +155,7 @@ async def zeige(interaction: discord.Interaction):
     overwrite = channel.overwrites_for(interaction.guild.default_role)
     overwrite.view_channel = True
     await channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+
     await interaction.response.send_message("✅ Dein Voicechat ist jetzt wieder sichtbar.", ephemeral=True)
 
 @bot.tree.command(name="jam", description="Spotify Jam-Link posten", guild=discord.Object(id=GUILD_ID))
@@ -173,7 +169,10 @@ async def jam(interaction: discord.Interaction, link: str):
     button = discord.ui.Button(label="🎶 Jam beitreten", url=link)
     view.add_item(button)
 
-    await interaction.response.send_message(f"{interaction.user.mention} hat einen Spotify Jam gestartet:", view=view)
+    await interaction.response.send_message(
+        f"{interaction.user.mention} hat einen Spotify Jam gestartet:",
+        view=view
+    )
 
 @bot.tree.command(name="einladen", description="Gib bestimmten Mitgliedern Zugriff auf deinen Voicechat", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
@@ -183,8 +182,11 @@ async def jam(interaction: discord.Interaction, link: str):
     user4="Mitglied 4",
     user5="Mitglied 5"
 )
-async def einladen(interaction: discord.Interaction, user1: discord.Member, user2: Optional[discord.Member] = None,
-                   user3: Optional[discord.Member] = None, user4: Optional[discord.Member] = None,
+async def einladen(interaction: discord.Interaction,
+                   user1: discord.Member,
+                   user2: Optional[discord.Member] = None,
+                   user3: Optional[discord.Member] = None,
+                   user4: Optional[discord.Member] = None,
                    user5: Optional[discord.Member] = None):
     if not interaction.user.voice or not interaction.user.voice.channel:
         await interaction.response.send_message("❌ Du bist in keinem Voice-Channel.", ephemeral=True)
@@ -219,65 +221,47 @@ async def limit(interaction: discord.Interaction, limit: int):
     msg = "Teilnehmerlimit entfernt." if limit == 0 else f"Teilnehmerlimit auf {limit} gesetzt."
     await interaction.response.send_message(f"✅ {msg}", ephemeral=True)
 
-@bot.tree.command(name="reactionrole", description="Füge eine Reaction Role hinzu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji zur Reaktion", role="Rolle", channel="Kanal")
-async def reactionrole_add(interaction: discord.Interaction, message_id: str, emoji: str,
-                           role: discord.Role, channel: discord.TextChannel):
+# --- Reaction Role Commands (admin-only) ---
+@app_commands.checks.has_permissions(manage_roles=True)
+@bot.tree.command(name="reactionrole_add", description="Füge eine Reaction Role hinzu", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji", role="Rolle", channel="Channel")
+async def reactionrole_add(interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role, channel: discord.TextChannel):
     try:
         message = await channel.fetch_message(int(message_id))
         await message.add_reaction(emoji)
+        reaction_roles.setdefault(message_id, {})[emoji] = role.id
+
+        with open(REACTION_ROLE_FILE, "w") as f:
+            json.dump(reaction_roles, f)
+
+        await interaction.response.send_message(f"✅ Reaction Role hinzugefügt: {emoji} → {role.mention}", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"❌ Fehler beim Hinzufügen der Reaktion: {e}", ephemeral=True)
-        return
+        await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
 
-    if message_id not in reaction_roles:
-        reaction_roles[message_id] = []
-
-    for r in reaction_roles[message_id]:
-        if r["emoji"] == emoji:
-            await interaction.response.send_message("⚠️ Diese Emoji-Reaktion ist bereits verknüpft.", ephemeral=True)
-            return
-
-    reaction_roles[message_id].append({"emoji": emoji, "role_id": role.id})
-    save_reaction_roles()
-
-    await interaction.response.send_message("✅ Reaction Role wurde hinzugefügt.", ephemeral=True)
-
+@app_commands.checks.has_permissions(manage_roles=True)
 @bot.tree.command(name="reactionrole_remove", description="Entferne eine Reaction Role", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    message_id="ID der Nachricht",
-    emoji="Emoji, das entfernt werden soll"
-)
+@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji, das entfernt werden soll")
 async def reactionrole_remove(interaction: discord.Interaction, message_id: str, emoji: str):
     try:
-        with open("reaction_roles.json", "r") as f:
-            reaction_roles = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        reaction_roles = {}
+        if message_id in reaction_roles and emoji in reaction_roles[message_id]:
+            del reaction_roles[message_id][emoji]
+            if not reaction_roles[message_id]:
+                del reaction_roles[message_id]
 
-    if message_id not in reaction_roles or emoji not in reaction_roles[message_id]:
-        await interaction.response.send_message("❌ Keine Reaction Role mit diesen Daten gefunden.", ephemeral=True)
-        return
+            with open(REACTION_ROLE_FILE, "w") as f:
+                json.dump(reaction_roles, f)
 
-    # Rolle löschen
-    del reaction_roles[message_id][emoji]
+            await interaction.response.send_message("✅ Reaction Role wurde entfernt.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Keine passende Reaction Role gefunden.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Fehler: {e}", ephemeral=True)
 
-    if not reaction_roles[message_id]:
-        del reaction_roles[message_id]
-
-    with open("reaction_roles.json", "w") as f:
-        json.dump(reaction_roles, f, indent=4)
-
-    # Versuche, die Reaktion von der Nachricht zu entfernen
-    for channel in interaction.guild.text_channels:
-        try:
-            message = await channel.fetch_message(int(message_id))
-            await message.clear_reaction(emoji)
-            break  # Wenn erfolgreich, nicht weiter suchen
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            continue
-
-    await interaction.response.send_message("✅ Reaction Role wurde entfernt und Reaktion gelöscht.", ephemeral=True)
+# --- Fehlerbehandlung für fehlende Rechte ---
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
 
 # --- Bot starten ---
 bot.run(os.getenv("DISCORD_TOKEN"))
