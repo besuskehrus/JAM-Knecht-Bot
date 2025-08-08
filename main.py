@@ -243,21 +243,42 @@ async def reactionrole_add(interaction: discord.Interaction, message_id: str, em
 
     await interaction.response.send_message("✅ Reaction Role wurde hinzugefügt.", ephemeral=True)
 
-@bot.tree.command(name="reactionrole_remove", description="Entfernt eine Reaction Role", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji, das entfernt werden soll")
+@bot.tree.command(name="reactionrole_remove", description="Entferne eine Reaction Role", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    message_id="ID der Nachricht",
+    emoji="Emoji, das entfernt werden soll"
+)
 async def reactionrole_remove(interaction: discord.Interaction, message_id: str, emoji: str):
-    if message_id not in reaction_roles:
-        await interaction.response.send_message("❌ Für diese Nachricht existieren keine Reaction Roles.", ephemeral=True)
+    try:
+        with open("reaction_roles.json", "r") as f:
+            reaction_roles = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        reaction_roles = {}
+
+    if message_id not in reaction_roles or emoji not in reaction_roles[message_id]:
+        await interaction.response.send_message("❌ Keine Reaction Role mit diesen Daten gefunden.", ephemeral=True)
         return
 
-    original_length = len(reaction_roles[message_id])
-    reaction_roles[message_id] = [r for r in reaction_roles[message_id] if r["emoji"] != emoji]
+    role_id = reaction_roles[message_id][emoji]
+    del reaction_roles[message_id][emoji]
 
-    if len(reaction_roles[message_id]) < original_length:
-        if not reaction_roles[message_id]:
-            del reaction_roles[message_id]
-        save_reaction_roles()
-        await interaction.response.send_message("✅ Reaction Role wurde entfernt.", ephemeral=True)
+    # Wenn keine Emojis mehr auf dieser Nachricht registriert sind, löschen wir den Key
+    if not reaction_roles[message_id]:
+        del reaction_roles[message_id]
+
+    with open("reaction_roles.json", "w") as f:
+        json.dump(reaction_roles, f, indent=4)
+
+    # Emoji von der Nachricht entfernen
+    for channel in interaction.guild.text_channels:
+        try:
+            message = await channel.fetch_message(int(message_id))
+            await message.clear_reaction(emoji)
+            break
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            continue
+
+    await interaction.response.send_message("✅ Reaction Role wurde entfernt und Reaktion gelöscht.", ephemeral=True)
     else:
         await interaction.response.send_message("❌ Keine passende Emoji-Verknüpfung gefunden.", ephemeral=True)
 
