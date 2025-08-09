@@ -1,6 +1,8 @@
 import os
 import threading
 from flask import Flask
+import praw
+import time
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -296,6 +298,8 @@ last_post_id = None  # um nur neue Posts zu posten
 @tasks.loop(minutes=30)
 async def fetch_reddit_memes():
     global last_post_id
+    print("🔍 Starte Abruf von Reddit-Memes...")
+
     if not all([REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, MEME_CHANNEL_ID]):
         print("⚠️ Reddit API oder Meme Channel nicht richtig konfiguriert.")
         return
@@ -305,12 +309,14 @@ async def fetch_reddit_memes():
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
+            print(f"📡 Anfrage an Reddit gesendet: Status {resp.status}")
             if resp.status != 200:
-                print(f"Fehler beim Abrufen von Reddit: Status {resp.status}")
+                print(f"❌ Fehler beim Abrufen von Reddit: Status {resp.status}")
                 return
             data = await resp.json()
 
     posts = data["data"]["children"]
+    print(f"📦 {len(posts)} Posts empfangen.")
 
     channel = bot.get_channel(MEME_CHANNEL_ID)
     if channel is None:
@@ -318,29 +324,44 @@ async def fetch_reddit_memes():
         return
 
     new_last_post_id = last_post_id
+    posted_count = 0
 
     for post in posts[::-1]:  # von alt nach neu prüfen
         p = post["data"]
-        # Prüfe, ob Post ein Bild ist
+        print(f"➡️ Prüfe Post: {p['title']}")
         if p.get("post_hint") != "image":
+            print("   ⏩ Übersprungen (kein Bild).")
             continue
+
         post_id = p["id"]
         if last_post_id == post_id:
-            # Alle neuen Posts wurden bereits gepostet
+            print("   ⏩ Keine neuen Posts mehr.")
             break
 
         title = p["title"]
         image_url = p["url"]
+        print(f"   ✅ Sende Meme: {title}")
 
         try:
             await channel.send(f"**{title}**\n{image_url}")
+            posted_count += 1
         except Exception as e:
-            print(f"Fehler beim Senden des Memes: {e}")
+            print(f"   ❌ Fehler beim Senden des Memes: {e}")
 
         new_last_post_id = post_id
 
     if new_last_post_id:
         last_post_id = new_last_post_id
+
+    print(f"🏁 Meme-Abruf abgeschlossen. {posted_count} neue Memes gesendet.")
+
+
+# --- Testbefehl für Reddit ---
+@bot.tree.command(name="reddit_test", description="Testet den sofortigen Abruf von Reddit-Memes", guild=discord.Object(id=GUILD_ID))
+async def reddit_test(interaction: discord.Interaction):
+    await interaction.response.send_message("🚀 Starte Test-Abruf von Reddit-Memes...", ephemeral=True)
+    await fetch_reddit_memes()
+    await interaction.followup.send("✅ Test-Abruf abgeschlossen.", ephemeral=True)
 
 # --- Bot Start ---
 bot.run(os.getenv("DISCORD_TOKEN"))
