@@ -2,11 +2,12 @@ import os
 import threading
 from flask import Flask
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 from typing import Optional
 import json
+import aiohttp
 
 # --- Flask Webserver ---
 app = Flask(__name__)
@@ -33,9 +34,15 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 GUILD_ID = int(os.getenv("GUILD_ID"))
 TEMP_VC_CATEGORY_ID = int(os.getenv("TEMP_VC_CATEGORY_ID", 0))
 CREATE_VC_CHANNEL_ID = int(os.getenv("CREATE_VC_CHANNEL_ID", 0))
+MEME_CHANNEL_ID = int(os.getenv("MEME_CHANNEL_ID"))  # Neu für Reddit Memes
 
 if TEMP_VC_CATEGORY_ID == 0 or CREATE_VC_CHANNEL_ID == 0:
     print("⚠️ Bitte TEMP_VC_CATEGORY_ID und CREATE_VC_CHANNEL_ID als Umgebungsvariablen setzen!")
+
+# Reddit API Credentials aus Umgebungsvariablen
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "discord-bot-meme-fetcher")
 
 # Mapping: User ID -> Temp Voice Channel ID
 temp_voice_channels = {}
@@ -62,6 +69,8 @@ async def on_ready():
         print(f"🔁 Slash Commands synchronisiert: {len(synced)}")
     except Exception as e:
         print(f"Fehler beim Synchronisieren: {e}")
+    # Starte Reddit Meme Task
+    fetch_reddit_memes.start()
 
 # --- Voice State Update: Temp VC Logik ---
 @bot.event
@@ -253,4 +262,85 @@ async def reactionrole_add(interaction: discord.Interaction, message_id: str, em
     await interaction.response.send_message(f"✅ Reaction Role wurde hinzugefügt: {emoji} → {role.name}", ephemeral=True)
 
 # /reactionrole_remove
-@bot.tree
+@bot.tree.command(name="reactionrole_remove", description="Entferne eine Reaction Role", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji der Reaction Role, die entfernt werden soll")
+async def reactionrole_remove(interaction: discord.Interaction, message_id: str, emoji: str):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Du hast keine Berechtigung, Reaction Roles zu verwalten.", ephemeral=True)
+        return
+
+    channel = interaction.channel
+    key = f"{channel.id}-{message_id}"
+    if key not in reaction_roles or emoji not in reaction_roles[key]:
+        await interaction.response.send_message("❌ Diese Reaction Role existiert nicht.", ephemeral=True)
+        return
+
+    try:
+        message = await channel.fetch_message(int(message_id))
+        await message.clear_reaction(emoji)
+    except Exception:
+        await interaction.response.send_message("❌ Nachricht oder Reaction nicht gefunden.", ephemeral=True)
+        return
+
+    del reaction_roles[key][emoji]
+    if not reaction_roles[key]:
+        del reaction_roles[key]
+
+    save_reaction_roles()
+    await interaction.response.send_message(f"✅ Reaction Role {emoji} wurde entfernt.", ephemeral=True)
+
+# --- Reddit Meme Fetching ---
+
+last_post_id = None  # um nur neue Posts zu posten
+
+@tasks.loop(minutes=30)
+async def fetch_reddit_memes():
+    global last_post_id
+    if not all([REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, MEME_CHANNEL_ID]):
+        print("⚠️ Reddit API oder Meme Channel nicht richtig konfiguriert.")
+        return
+
+    url = "https://www.reddit.com/r/deutschememes/hot.json?limit=10"
+    headers = {"User-Agent": REDDIT_USER_AGENT}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                print(f"Fehler beim Abrufen von Reddit: Status {resp.status}")
+                return
+            data = await resp.json()
+
+    posts = data["data"]["children"]
+
+    channel = bot.get_channel(MEME_CHANNEL_ID)
+    if channel is None:
+        print("⚠️ Meme Channel nicht gefunden!")
+        return
+
+    new_last_post_id = last_post_id
+
+    for post in posts[::-1]:  # von alt nach neu prüfen
+        p = post["data"]
+        # Prüfe, ob Post ein Bild ist
+        if p.get("post_hint") != "image":
+            continue
+        post_id = p["id"]
+        if last_post_id == post_id:
+            # Alle neuen Posts wurden bereits gepostet
+            break
+
+        title = p["title"]
+        image_url = p["url"]
+
+        try:
+            await channel.send(f"**{title}**\n{image_url}")
+        except Exception as e:
+            print(f"Fehler beim Senden des Memes: {e}")
+
+        new_last_post_id = post_id
+
+    if new_last_post_id:
+        last_post_id = new_last_post_id
+
+# --- Bot Start ---
+bot.run(os.getenv("DISCORD_TOKEN"))
