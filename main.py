@@ -1,7 +1,6 @@
 import os
 import threading
 from flask import Flask
-import praw
 import time
 import discord
 from discord.ext import commands, tasks
