@@ -2,12 +2,11 @@ import os
 import threading
 from flask import Flask
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
 import asyncio
-import json
-import aiohttp
 from typing import Optional
+import json
 
 # --- Flask Webserver ---
 app = Flask(__name__)
@@ -34,40 +33,25 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 GUILD_ID = int(os.getenv("GUILD_ID"))
 TEMP_VC_CATEGORY_ID = int(os.getenv("TEMP_VC_CATEGORY_ID", 0))
 CREATE_VC_CHANNEL_ID = int(os.getenv("CREATE_VC_CHANNEL_ID", 0))
-MEME_CHANNEL_ID = int(os.getenv("MEME_CHANNEL_ID", 0))
 
 if TEMP_VC_CATEGORY_ID == 0 or CREATE_VC_CHANNEL_ID == 0:
     print("⚠️ Bitte TEMP_VC_CATEGORY_ID und CREATE_VC_CHANNEL_ID als Umgebungsvariablen setzen!")
 
-if MEME_CHANNEL_ID == 0:
-    print("⚠️ Bitte MEME_CHANNEL_ID als Umgebungsvariable setzen!")
-
 # Mapping: User ID -> Temp Voice Channel ID
 temp_voice_channels = {}
 
-# --- Reaction Roles Daten ---
-REACTION_ROLES_FILE = "reaction_roles.json"
+# Reaction Roles laden / speichern
+REACTION_ROLE_FILE = "reaction_roles.json"
+
 try:
-    with open(REACTION_ROLES_FILE, "r", encoding="utf-8") as f:
+    with open(REACTION_ROLE_FILE, "r") as f:
         reaction_roles = json.load(f)
 except FileNotFoundError:
     reaction_roles = {}
 
 def save_reaction_roles():
-    with open(REACTION_ROLES_FILE, "w", encoding="utf-8") as f:
+    with open(REACTION_ROLE_FILE, "w") as f:
         json.dump(reaction_roles, f, indent=4)
-
-# --- Reddit Cache ---
-LAST_SEEN_FILE = "last_seen_post.json"
-try:
-    with open(LAST_SEEN_FILE, "r", encoding="utf-8") as f:
-        last_seen_post = json.load(f)
-except FileNotFoundError:
-    last_seen_post = {}
-
-def save_last_seen_post():
-    with open(LAST_SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(last_seen_post, f, indent=4)
 
 # --- On Ready ---
 @bot.event
@@ -78,7 +62,6 @@ async def on_ready():
         print(f"🔁 Slash Commands synchronisiert: {len(synced)}")
     except Exception as e:
         print(f"Fehler beim Synchronisieren: {e}")
-    reddit_meme_poster.start()
 
 # --- Voice State Update: Temp VC Logik ---
 @bot.event
@@ -86,11 +69,11 @@ async def on_voice_state_update(member, before, after):
     global temp_voice_channels
 
     if member.bot:
-        return
+        return  # Bots ignorieren
 
     guild = member.guild
 
-    # Temp VC erstellen
+    # Temp VC erstellen, wenn User dem "Create Voice" Channel beitritt
     if after.channel and after.channel.id == CREATE_VC_CHANNEL_ID:
         category = guild.get_channel(TEMP_VC_CATEGORY_ID)
         if category is None:
@@ -98,7 +81,7 @@ async def on_voice_state_update(member, before, after):
             return
 
         overwrites = {
-            guild.default_role: discord.PermissionOverwrite(connect=True, speak=True, view_channel=False),
+            guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=False),
             member: discord.PermissionOverwrite(manage_channels=True, connect=True, speak=True, view_channel=True)
         }
         new_vc = await guild.create_voice_channel(
@@ -109,12 +92,12 @@ async def on_voice_state_update(member, before, after):
         temp_voice_channels[member.id] = new_vc.id
         await member.move_to(new_vc)
 
-    # Temp VC löschen wenn leer
+    # Temp VC löschen, wenn dieser leer wird
     if before.channel and before.channel.id in temp_voice_channels.values():
         channel = before.channel
         if len(channel.members) == 0:
             await channel.delete()
-            # Mapping bereinigen
+            # Eintrag im Mapping entfernen
             user_to_remove = None
             for uid, cid in temp_voice_channels.items():
                 if cid == channel.id:
@@ -236,5 +219,38 @@ async def limit(interaction: discord.Interaction, limit: int):
     msg = "Teilnehmerlimit entfernt." if limit == 0 else f"Teilnehmerlimit auf {limit} gesetzt."
     await interaction.response.send_message(f"✅ {msg}", ephemeral=True)
 
-# --- Slash Command: /reactionrole add ---
-@bot.tree.command(name="
+# --- Reaction Role Befehle ---
+
+# /reactionrole_add
+@bot.tree.command(name="reactionrole_add", description="Füge eine Reaction Role hinzu", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(message_id="ID der Nachricht", emoji="Emoji für die Rolle", role="Rolle, die vergeben werden soll")
+async def reactionrole_add(interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Du hast keine Berechtigung, Reaction Roles zu verwalten.", ephemeral=True)
+        return
+
+    try:
+        channel = interaction.channel
+        message = await channel.fetch_message(int(message_id))
+    except Exception:
+        await interaction.response.send_message("❌ Nachricht nicht gefunden.", ephemeral=True)
+        return
+
+    key = f"{channel.id}-{message_id}"
+    if key not in reaction_roles:
+        reaction_roles[key] = {}
+
+    reaction_roles[key][emoji] = role.id
+    save_reaction_roles()
+
+    # Reaction hinzufügen
+    try:
+        await message.add_reaction(emoji)
+    except Exception:
+        await interaction.response.send_message("❌ Emoji konnte nicht hinzugefügt werden.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"✅ Reaction Role wurde hinzugefügt: {emoji} → {role.name}", ephemeral=True)
+
+# /reactionrole_remove
+@bot.tree
