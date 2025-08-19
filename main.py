@@ -166,7 +166,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 del temp_voice_channels[remove_key]
 
 # ---------------------------
-# Slash Commands: verstecke / zeige / jam / einladen / limit
+# Slash Commands: verstecke / zeige / jam / einladen / limit / test
 # ---------------------------
 @bot.tree.command(name="verstecke", description="Verstecke deinen temporären Voicechat", guild=discord.Object(id=GUILD_ID))
 async def verstecke(interaction: discord.Interaction):
