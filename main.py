@@ -118,41 +118,48 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     # Erstelle Temp-VC wenn Nutzer in den "Create" Channel eintritt
     if after.channel and after.channel.id == CREATE_VC_CHANNEL_ID:
-     guild = member.guild
-     category = guild.get_channel(TEMP_VC_CATEGORY_ID)
+        guild = member.guild
+        category = guild.get_channel(TEMP_VC_CATEGORY_ID)
+        if category is None:
+            print("⚠️ Kategorie für Temp-VC nicht gefunden!")
+            return
 
-    if category is None:
-        print("⚠️ Kategorie für Temp-VC nicht gefunden!")
-        return
+        # WICHTIG: Wir setzen hier keine permissive @everyone-Overwrite,
+        # damit die Kategorie-Rechte greifen; nur der Ersteller bekommt explizite Rechte.
+        akzeptiert_rolle = discord.utils.get(guild.roles, name="akzeptiert")
 
-    # Kategorie-Rechte bleiben erhalten,
-    # der Ersteller bekommt zusätzliche Rechte
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(
-            connect=False,
-            view_channel=False
-        ),
-        member: discord.PermissionOverwrite(
-            manage_channels=True,
+        overwrites = {
+            guild.default_role: discord.PremissionOverwrite(
+                connect=False,
+                view_channel=False
+            ),
+
+            member: discord.PermissionOverwrite(
+                manage_channels=True,
+                connect=True,
+                speak=True,
+                view_channel=True
+            )
+        }
+
+    if akzeptiert_role:
+        overwrites[akzeptiert_role] = discord.Permission.Overwrite(
             connect=True,
             speak=True,
             stream=True,
-            view_channel=True
+            view_channels=True
         )
-    }
-
-    new_vc = await guild.create_voice_channel(
-        name=f"Voicechat von {member.display_name}",
-        category=category,
-        overwrites=overwrites
-    )
-
-    temp_voice_channels[member.id] = new_vc.id
-
-    try:
-        await member.move_to(new_vc)
-    except Exception as e:
-        print(f"⚠️ Fehler beim Moven des Nutzers: {e}")
+        
+        new_vc = await guild.create_voice_channel(
+            name=f"Voicechat von {member.display_name}",
+            category=category,
+            overwrites=overwrites
+        )
+        temp_voice_channels[member.id] = new_vc.id
+        try:
+            await member.move_to(new_vc)
+        except Exception as e:
+            print(f"⚠️ Fehler beim Moven des Nutzers: {e}")
 
     # Löschen des Temp-VC wenn leer
     if before.channel and before.channel.id in temp_voice_channels.values():
