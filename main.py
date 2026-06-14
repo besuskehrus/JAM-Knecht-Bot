@@ -126,7 +126,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
 # Kategorie-Rechte bleiben erhalten,
 # der Ersteller bekommt zusätzliche Rechte
-       overwrites = {
+overwrites = {
     member: discord.PermissionOverwrite(
         manage_channels=True,
         connect=True,
