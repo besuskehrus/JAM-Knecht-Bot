@@ -124,17 +124,21 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             print("⚠️ Kategorie für Temp-VC nicht gefunden!")
             return
 
-# Kategorie-Rechte bleiben erhalten,
-# der Ersteller bekommt zusätzliche Rechte
-overwrites = {
-    member: discord.PermissionOverwrite(
-        manage_channels=True,
-        connect=True,
-        speak=True,
-        stream=True,
-        view_channel=True
-    )
-}
+    # Kategorie-Rechte bleiben erhalten,
+    # der Ersteller bekommt zusätzliche Rechte
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(
+            connect=False,
+            view_channel=False
+        ),
+        member: discord.PermissionOverwrite(
+            manage_channels=True,
+            connect=True,
+            speak=True,
+            stream=True,
+            view_channel=True
+        )
+    }
 
         new_vc = await guild.create_voice_channel(
             name=f"Voicechat von {member.display_name}",
