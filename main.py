@@ -118,8 +118,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     # Erstelle Temp-VC wenn Nutzer in den "Create" Channel eintritt
     if after.channel and after.channel.id == CREATE_VC_CHANNEL_ID:
-    guild = member.guild
-    category = guild.get_channel(TEMP_VC_CATEGORY_ID)
+     guild = member.guild
+     category = guild.get_channel(TEMP_VC_CATEGORY_ID)
 
     if category is None:
         print("⚠️ Kategorie für Temp-VC nicht gefunden!")
