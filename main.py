@@ -118,11 +118,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     # Erstelle Temp-VC wenn Nutzer in den "Create" Channel eintritt
     if after.channel and after.channel.id == CREATE_VC_CHANNEL_ID:
-        guild = member.guild
-        category = guild.get_channel(TEMP_VC_CATEGORY_ID)
-        if category is None:
-            print("⚠️ Kategorie für Temp-VC nicht gefunden!")
-            return
+    guild = member.guild
+    category = guild.get_channel(TEMP_VC_CATEGORY_ID)
+
+    if category is None:
+        print("⚠️ Kategorie für Temp-VC nicht gefunden!")
+        return
 
     # Kategorie-Rechte bleiben erhalten,
     # der Ersteller bekommt zusätzliche Rechte
@@ -140,16 +141,18 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         )
     }
 
-        new_vc = await guild.create_voice_channel(
-            name=f"Voicechat von {member.display_name}",
-            category=category,
-            overwrites=overwrites
-        )
-        temp_voice_channels[member.id] = new_vc.id
-        try:
-            await member.move_to(new_vc)
-        except Exception as e:
-            print(f"⚠️ Fehler beim Moven des Nutzers: {e}")
+    new_vc = await guild.create_voice_channel(
+        name=f"Voicechat von {member.display_name}",
+        category=category,
+        overwrites=overwrites
+    )
+
+    temp_voice_channels[member.id] = new_vc.id
+
+    try:
+        await member.move_to(new_vc)
+    except Exception as e:
+        print(f"⚠️ Fehler beim Moven des Nutzers: {e}")
 
     # Löschen des Temp-VC wenn leer
     if before.channel and before.channel.id in temp_voice_channels.values():
